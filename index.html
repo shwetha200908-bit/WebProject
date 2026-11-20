@@ -1,0 +1,217 @@
+import socket
+import threading
+
+HOST = "0.0.0.0"
+TCP_PORT = 5000
+UDP_PORT = 5001
+
+def handle_tcp_client(conn, addr):
+    print(f"[TCP] Connection established with {addr}")
+    try:
+        while True:
+            data = conn.recv(1024)
+            if not data:
+                break
+
+            msg = data.decode()
+            print(f"[TCP] Received from {addr}: {msg}")
+            conn.sendall(("ACK: " + msg).encode())
+    finally:
+        conn.close()
+        print(f"[TCP] Connection closed with {addr}")
+
+def tcp_server():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind((HOST, TCP_PORT))
+    s.listen(5)
+
+    print(f"[TCP] Server listening on port {TCP_PORT}")
+
+    while True:
+        conn, addr = s.accept()
+        threading.Thread(
+            target=handle_tcp_client,
+            args=(conn, addr),
+            daemon=True
+        ).start()
+
+def udp_server():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind((HOST, UDP_PORT))
+
+    print(f"[UDP] Server listening on port {UDP_PORT}")
+
+    while True:
+        data, addr = s.recvfrom(1024)
+        msg = data.decode()
+
+        print(f"[UDP] Received from {addr}: {msg}")
+        s.sendto(("ACK: " + msg).encode(), addr)
+
+if __name__ == "__main__":
+    threading.Thread(target=tcp_server, daemon=True).start()
+    threading.Thread(target=udp_server, daemon=True).start()
+
+    print("Server started. Press Ctrl+C to stop.")
+
+    try:
+        while True:
+            threading.Event().wait(1)
+    except KeyboardInterrupt:
+        print("\nServer stopped.")
+import socket
+import time
+
+TCP_PORT = 5000
+UDP_PORT = 5001
+
+def tcp_session(client_id, server_ip):
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect((server_ip, TCP_PORT))
+
+    print("Connection Status : Connected (TCP handshake complete)")
+
+    while True:
+        msg = input(f"[{client_id}] Enter message (or 'exit'): ")
+
+        if msg.lower() == "exit":
+            break
+
+        start = time.perf_counter()
+
+        s.sendall(f"{client_id}: {msg}".encode())
+        reply = s.recv(1024).decode()
+
+        elapsed = (time.perf_counter() - start) * 1000
+
+        print(f"Message Received  : {reply}")
+        print("Acknowledgment    : Received")
+        print(f"Transmission Time : {elapsed:.3f} ms")
+
+    s.close()
+    print("Connection Status : Closed")
+
+def udp_session(client_id, server_ip):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(2)
+
+    print("Connection Status : Connectionless (no handshake)")
+
+    while True:
+        msg = input(f"[{client_id}] Enter message (or 'exit'): ")
+
+        if msg.lower() == "exit":
+            break
+
+        start = time.perf_counter()
+
+        s.sendto(
+            f"{client_id}: {msg}".encode(),
+            (server_ip, UDP_PORT)
+        )
+
+        try:
+            reply, _ = s.recvfrom(1024)
+            elapsed = (time.perf_counter() - start) * 1000
+
+            print(f"Message Received  : {reply.decode()}")
+            print("Acknowledgment    : Received")
+            print(f"Transmission Time : {elapsed:.3f} ms")
+
+        except socket.timeout:
+            print("Acknowledgment    : Not received (packet may be lost)")
+
+    s.close()
+
+if __name__ == "__main__":
+    client_id = input("Enter Client ID: ")
+    server_ip = input("Enter Server IP Address: ")
+
+    proto = input("Select Protocol (TCP/UDP): ").strip().upper()
+
+    if proto == "TCP":
+        tcp_session(client_id, server_ip)
+    elif proto == "UDP":
+        udp_session(client_id, server_ip)
+    else:
+        print("Invalid protocol selected.") 
+import socket
+import time
+
+SERVER_IP = "127.0.0.1"
+TCP_PORT = 5000
+UDP_PORT = 5001
+
+COUNT = 100
+MESSAGE = b"Hello Server"
+
+def test_tcp():
+    times, acks = [], 0
+
+    t0 = time.perf_counter()
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect((SERVER_IP, TCP_PORT))
+
+    setup = (time.perf_counter() - t0) * 1000
+
+    for _ in range(COUNT):
+        st = time.perf_counter()
+
+        s.sendall(MESSAGE)
+
+        if s.recv(1024):
+            acks += 1
+
+        times.append((time.perf_counter() - st) * 1000)
+
+    s.close()
+
+    return setup, times, acks
+
+def test_udp():
+    times, acks = [], 0
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(1)
+
+    for _ in range(COUNT):
+        st = time.perf_counter()
+
+        s.sendto(MESSAGE, (SERVER_IP, UDP_PORT))
+
+        try:
+            s.recvfrom(1024)
+            acks += 1
+            times.append((time.perf_counter() - st) * 1000)
+
+        except socket.timeout:
+            pass
+
+    s.close()
+
+    return 0.0, times, acks
+
+def avg(lst):
+    return sum(lst) / len(lst) if lst else 0.0
+
+if __name__ == "__main__":
+    t_setup, t_times, t_acks = test_tcp()
+    u_setup, u_times, u_acks = test_udp()
+
+    print("=" * 55)
+    print("          TCP vs UDP COMPARISON REPORT")
+    print("=" * 55)
+
+    print(f"{'Parameter':<28}{'TCP':<14}{'UDP':<14}")
+    print("-" * 55)
+
+    print(f"{'Messages sent':<28}{COUNT:<14}{COUNT:<14}")
+    print(f"{'ACKs received':<28}{t_acks:<14}{u_acks:<14}")
+    print(f"{'Connection setup (ms)':<28}{t_setup:<14.3f}{'N/A':<14}")
+    print(f"{'Avg transmission time (ms)':<28}{avg(t_times):<14.3f}{avg(u_times):<14.3f}")
+    print(f"{'Packet loss':<28}{COUNT - t_acks:<14}{COUNT - u_acks:<14}")
+    print(f"{'Connection type':<28}{'Connection-oriented':<20}{'Connectionless'}")
+
+    print("=" * 55)
